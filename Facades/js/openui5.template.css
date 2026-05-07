@@ -224,6 +224,16 @@ table.jexcel .jexcel_column_filter {
     padding-top: 4px !important;
 }
 
+/* .sapUiUfdSpltContPane:has(.sapTntSideNavigationNotExpanded) {
+    width: 4rem !important;
+}
+
+.sapUiUfdSpltContCanvas:not(.exf-nav-expanded) {
+    left: 4rem !important;
+} */
+
+
+
 /* contetx menu indicator above first cell in top left corner */
 table.jexcel > thead > tr > td.jexcel_selectall:hover {
     background-color: #9c9c9c;

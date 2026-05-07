@@ -355,15 +355,20 @@ const exfLauncher = {};
 		});
 
 		_oShell = new sap.ui.unified.Shell({
+			showPane: false,
 			header: [
 				new sap.m.OverflowToolbar("exf-toolbar",{
 					design: "Transparent",
 					content: [
-						new sap.m.Button({
+						new sap.m.Button('exf_menu_toggle_btn', {
 							icon: "sap-icon://menu2",
 							layoutData: new sap.m.OverflowToolbarLayoutData({ priority: "NeverOverflow" }),
 							press: function () {
-								_oShell.setShowPane(!_oShell.getShowPane());
+								// toggle the expanded state on the nav sidebar
+								var oDomNav = document.querySelector('.sapTntSideNavigation');
+								var oNavMenu = oDomNav && sap.ui.getCore().byId(oDomNav.id);
+								if (!oNavMenu) return;
+								oNavMenu.setExpanded(!oNavMenu.getExpanded());
 							}
 						}),
 						new sap.m.OverflowToolbarButton("exf-home", {

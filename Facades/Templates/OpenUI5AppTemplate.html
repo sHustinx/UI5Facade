@@ -33,6 +33,21 @@
 			    0% { transform: rotate(0deg); }
 			    100% { transform: rotate(360deg); }
 			}
+
+			#exf_menu_toggle_btn{
+				padding-left: 1rem !important;
+			}
+
+			/* make menu stretch fullscreen on mobile */
+			@media (max-width: 600px) {
+				.sapTntSideNavigation{
+					width: 100vw !important;
+				}
+
+				.sapTntSideNavigationNotExpanded {
+					display: none !important;
+				}
+			}
 			
 			header.sapUiUfdShellHead > div, 
 			hr.sapUiUfdShellBrand {background-color: [#~facade:theme_header_color#] !important}
@@ -81,21 +96,22 @@
 		[#~facade:external_scripts#]
 		<script type="text/javascript">
 			// Main menu
-			function initMainMenu(oShell) {
-				var oNavMenu = [#~widget:NavMenu#]
-				
-				oShell.addPaneContent(oNavMenu);
-			}
-			
 			sap.ui.getCore().attachInit(function () {
-				sap.ui.require([
-					"sap/ui/unified/Shell",
-					"sap/ui/core/ComponentContainer",
-					"sap/tnt/NavigationList"
-				], function (Shell, ComponentContainer, NavigationList) {
-					var oShell = exfLauncher.initShell();
-					oShell.addContent(
-			    		new sap.ui.core.ComponentContainer({
+				// Register and load the font-awesome UI5 plugin before the shell renders,
+				// so that sap-icon://font-awesome/ icons work in the NavMenu.
+				jQuery.sap.registerModulePath('libs.font_awesome.plugin', 'vendor/bower-asset/font-awesome-openui5/dist/font-awesome-openui5.min');
+				sap.ui.require(['libs/font_awesome/plugin'], function () {
+					sap.ui.require([
+						"sap/ui/unified/Shell",
+						"sap/ui/core/ComponentContainer",
+						"sap/tnt/NavigationList",
+						"sap/m/HBox"
+					], function (Shell, ComponentContainer, NavigationList, HBox) {
+						var oShell = exfLauncher.initShell();
+
+						var oNavMenu = [#~widget:NavMenu#]
+
+						var oComponentContainer = new sap.ui.core.ComponentContainer({
 							name: "[#~page:alias#]",
 							async: true,
 							manifest: true,
@@ -105,24 +121,34 @@
 							componentCreated: function(oEvent) {
 								var oComponent = oEvent.getParameters().component;
 								exfLauncher.contextBar.init(oComponent);
-							}
-						})
-				    );
-					
-					initMainMenu(oShell);
+							},
+							width: "100%",
+							height: "100%",
+							layoutData: new sap.m.FlexItemData({ growFactor: 1, shrinkFactor: 1, baseSize: "0%" })
+						});
 
-					oShell.getModel().setProperty('/_app', {
-						home_title: '[#~page:name#]',
-						home_url: './',
-						app_url: '[#~page:url#]'
+						// workaround for new layout with sidenavigation (without pane in shell or toolpage layout)
+						oShell.addContent(
+							new sap.m.HBox({
+								items: [oNavMenu, oComponentContainer],
+								fitContainer: true,
+								height: "100%"
+							})
+						);
+
+						oShell.getModel().setProperty('/_app', {
+							home_title: '[#~page:name#]',
+							home_url: './',
+							app_url: '[#~page:url#]'
+						});
+						
+						oShell.placeAt("[#~page:alias#]");
+						
+						setTimeout(function(){
+							$('#exf-loader').hide();
+						}, 1000);
 					});
-					
-					oShell.placeAt("[#~page:alias#]");
-					
-					setTimeout(function(){
-						$('#exf-loader').hide();
-					}, 1000);
-				});
+				}); // sap.ui.require font_awesome/plugin
 			});
 		</script>
 		
