@@ -12,13 +12,35 @@
 
     /**
      * Dexie IndexedDB configuration for widget setups database
+     * 
+     * The primary key matches the identity of a setup in the metamodel: slug + widget_id + object_id
      */
     _dexieDbConfig: {
         name: 'exf-ui5-widgets',
-        version: 1,
+        version: 3,
         stores: {
-            setups: '[page_id+widget_id], setup_uid, date_last_applied'
+            setups: '[slug+widget_id+object_id], setup_uid, date_last_applied'
         }
+    },
+
+    /**
+     * Opens the setups database applying all schema versions
+     * 
+     * Note: IndexedDB cannot change the primary key of an existing store, so the store of version 1 is
+     * deleted in version 2 and recreated with the new key in version 3. Old setups are cleared on that upgrade.
+     * 
+     * @returns {Dexie} Dexie instance with the current schema
+     */
+    _oOpenSetupsDb: function() {
+        const oSetupsDb = new Dexie(exfSetupManager._dexieDbConfig.name);
+        oSetupsDb.version(1).stores({
+            setups: '[page_id+widget_id], setup_uid, date_last_applied'
+        });
+        oSetupsDb.version(2).stores({
+            setups: null
+        });
+        oSetupsDb.version(exfSetupManager._dexieDbConfig.version).stores(exfSetupManager._dexieDbConfig.stores);
+        return oSetupsDb;
     },
 
     /**
@@ -123,12 +145,13 @@
      * If the setup was applied manually, the table model is refreshed once to trigger the event listener.
      * 
      * @param {string} sSetupsTableId Id of the table that lists the setups
-     * @param {string} sPageId current page id (used to retrieve data from indexedDb)
-     * @param {string} sWidgetId current widget id (used to retrieve data from indexedDb)
+     * @param {string} sSlug slug of the current screen (part of the IndexedDb pk)
+     * @param {string} sWidgetId current widget id (part of the IndexedDb pk)
+     * @param {string} sObjectId UID of the meta object of the widget (part of the IndexedDb pk)
      * @param {boolean} bIsManuallyApplied whether the setup was applied manually or onLoad/form local storage (default: false)
      * @returns 
      */
-    markCurrentSetupAsActive: function(sSetupsTableId, sPageId, sWidgetId, bIsManuallyApplied = false) {
+    markCurrentSetupAsActive: function(sSetupsTableId, sSlug, sWidgetId, sObjectId, bIsManuallyApplied = false) {
 
         // get the ui5 datatable that lists the setups
         let oSetupTable = sap.ui.getCore().byId(sSetupsTableId);
@@ -142,7 +165,7 @@
             // so it needs to be some sort of event listener that re-sets it on re-open/update
             let fnSetAsDefault = function(oEvent) {
                 // retrieve the currently applied setup uid from indexedDb/session storage
-                exfSetupManager.getSetupProperty(sPageId, sWidgetId, null, 'setup_uid')
+                exfSetupManager.getSetupProperty(sSlug, sWidgetId, sObjectId, null, 'setup_uid')
                 .then(sSetupUid => {
                     let oModel = oSetupTable.getModel();
                     let oData = oModel.getProperty('/');
@@ -180,14 +203,15 @@
      * TODO/FIXME: technically, widgetId and buttonParentId could be the same? But with the way we store the setups, 
      * we only take the short ID (getDataWidget->getId()), not with the facade prefix. And to get the button, we need the full widget ID to find it in the DOM.
      * 
-     * @param {string} sPageId Id of the current page
+     * @param {string} sSlug slug of the current screen
      * @param {string} sWidgetId Id of the current widget
+     * @param {string} sObjectId UID of the meta object of the widget
      * @param {string} sButtonParentId Id of the parent of the quickselect button (to find the button in the ui)
      */
-    updateQuickSelectButtonCaption: function(sPageId, sWidgetId, sButtonParentId) {
+    updateQuickSelectButtonCaption: function(sSlug, sWidgetId, sObjectId, sButtonParentId) {
         // get the currently applied setup name from indexedDb
         // and update the quickselect button caption accordingly
-        exfSetupManager.getSetupProperty(sPageId, sWidgetId, null, 'setup_name')
+        exfSetupManager.getSetupProperty(sSlug, sWidgetId, sObjectId, null, 'setup_name')
         .then(sSetupName => {
             if (sSetupName !== null){
                 let oButton = sap.ui.getCore().byId(sButtonParentId + exfSetupManager._quickSelectButtonSuffix);
@@ -206,20 +230,21 @@
      * Example: in apply_setup, we either need to use the passed setupUxon fron the input data (if we press the applySetup button) or we need 
      * to retrieve it from indexedDb (when auto-applying steups onLoad). In both cases we need to work with a promise, because the apply_setup logic uses .then() etc.
      * 
-     * @param {string} sPageId the page identifier, e.g. 'page1' (part of the IndexedDb pk)
+     * @param {string} sSlug the slug of the current screen (part of the IndexedDb pk)
      * @param {string} sWidgetId the widget identifier, e.g. 'myTable' (part of the IndexedDb pk)
+     * @param {string} sObjectId the UID of the meta object of the widget (part of the IndexedDb pk)
      * @param {string|null} sPassedData if a value is passed, it will be returned immediately as a resolved promise
      * @param {string|null} sKey the key of the value to retrieve from indexedDb, e.g. 'setup_uxon' or 'setup_uid'
      * @returns {Promise<string|null>} a promise that resolves to the requested setup data or null if not found
      */
-    getSetupProperty: function(sPageId, sWidgetId, sPassedData = null, sKey = null) {
+    getSetupProperty: function(sSlug, sWidgetId, sObjectId, sPassedData = null, sKey = null) {
         // If data is passed in function, return it immediately as a resolved promise
         if (sPassedData !== null) {
             return Promise.resolve(sPassedData);
         }
 
         // get entry from indexed db and return the requested key
-        return exfSetupManager.dexie.getCurrentSetup(sPageId, sWidgetId)
+        return exfSetupManager.dexie.getCurrentSetup(sSlug, sWidgetId, sObjectId)
         .then(entry => {
             if (entry && entry[sKey]) {
                 if (sKey === 'setup_uxon') {
@@ -244,11 +269,12 @@
          *  
          * Also used in @UI5DataConfigurator.php, to automatically apply the last used setup on widget load.
          * 
-         * @param {string} sPageId Id of the current page
+         * @param {string} sSlug slug of the current screen
          * @param {string} sWidgetId id of the current widget
+         * @param {string} sObjectId UID of the meta object of the widget
          * @returns Promise resolving to the current setup entry from IndexedDB, if it exists
          */
-        getCurrentSetup: function(sPageId, sWidgetId) {
+        getCurrentSetup: function(sSlug, sWidgetId, sObjectId) {
 
             // if dexie is not available for some reason, return null
             if (! exfSetupManager._bIsDexieAvailable()){
@@ -256,11 +282,10 @@
             }
 
             // open indexedDb connection 
-            const oSetupsDb = new Dexie(exfSetupManager._dexieDbConfig.name);
-            oSetupsDb.version(exfSetupManager._dexieDbConfig.version).stores(exfSetupManager._dexieDbConfig.stores);
+            const oSetupsDb = exfSetupManager._oOpenSetupsDb();
 
-            // check if setup exists for page+widget pk and return the entry
-            return oSetupsDb.setups.get([sPageId, sWidgetId])
+            // check if setup exists for slug+widget+object pk and return the entry
+            return oSetupsDb.setups.get([sSlug, sWidgetId, sObjectId])
             .catch(err => {
                 console.error('Error reading from IndexedDB:', err);
             })
@@ -273,11 +298,12 @@
          * Deletes the current setup entry for a given page and widget from the IndexedDB, if it exists. 
          * Does not do anything if no entry exists.
          * 
-         * @param {string} sPageId id of the current page
+         * @param {string} sSlug slug of the current screen
          * @param {string} sWidgetId id of the current widget
+         * @param {string} sObjectId UID of the meta object of the widget
          * @returns Promise that resolves when the deletion is complete
          */
-        deleteCurrentSetup: function(sPageId, sWidgetId) {
+        deleteCurrentSetup: function(sSlug, sWidgetId, sObjectId) {
 
             // if dexie is not available for some reason, return null
             if (! exfSetupManager._bIsDexieAvailable()){
@@ -285,11 +311,10 @@
             }
 
             // open indexedDb connection 
-            const oSetupsDb = new Dexie(exfSetupManager._dexieDbConfig.name);
-            oSetupsDb.version(exfSetupManager._dexieDbConfig.version).stores(exfSetupManager._dexieDbConfig.stores);
+            const oSetupsDb = exfSetupManager._oOpenSetupsDb();
 
             // delete entry if it exists
-            return oSetupsDb.setups.delete([sPageId, sWidgetId])
+            return oSetupsDb.setups.delete([sSlug, sWidgetId, sObjectId])
             .catch(err => {
                 console.error('Error deleting entry from IndexedDB:', err);
             })
@@ -301,19 +326,21 @@
         /**
          * Saves or updates a passed setup as the last applied setup for a given page and widget in the IndexedDB. 
          * 
-         * @param {string} sPageId current page id (part of dexie pk)
+         * @param {string} sSlug slug of the current screen (part of dexie pk)
          * @param {string} sWidgetId current widget id (part of dexie pk)
+         * @param {string} sObjectId UID of the meta object of the widget (part of dexie pk)
          * @param {string} sSetupUid current widget setup uid (used to identify the applied setup/adding checkmark in setups table)
          * @param {string} sSetupUxon current widget setup uxon
          * @param {string} sSetupName current widget setup name
          */
-        saveLastAppliedSetup: function(sPageId, sWidgetId, sSetupUid, sSetupUxon, sSetupName) { 
+        saveLastAppliedSetup: function(sSlug, sWidgetId, sObjectId, sSetupUid, sSetupUxon, sSetupName) { 
             
             // setup entry to store in dexie.
-            // combination of page and widget id as primary key for db entry
+            // combination of slug, widget id and object id as primary key for db entry
             let oSetupObj = {
-                page_id: sPageId,
+                slug: sSlug,
                 widget_id: sWidgetId,
+                object_id: sObjectId,
                 setup_uid: sSetupUid,
                 date_last_applied: new Date().toISOString(),
                 setup_uxon: sSetupUxon,
@@ -326,8 +353,7 @@
             }
 
             // open indexedDb connection
-            const oSetupsDb = new Dexie(exfSetupManager._dexieDbConfig.name);
-            oSetupsDb.version(exfSetupManager._dexieDbConfig.version).stores(exfSetupManager._dexieDbConfig.stores);
+            const oSetupsDb = exfSetupManager._oOpenSetupsDb();
 
             // Save setup in db, then close connection 
             oSetupsDb.setups.put(

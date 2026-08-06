@@ -5,6 +5,7 @@ use exface\Core\Factories\MetaObjectFactory;
 use exface\Core\Interfaces\Actions\ActionInterface;
 use exface\Core\Interfaces\Actions\iReadData;
 use exface\Core\Facades\AbstractAjaxFacade\Elements\JqueryDataTableTrait;
+use exface\Core\Interfaces\WidgetInterface;
 use exface\Core\Interfaces\Widgets\iSupportMultiSelect;
 use exface\Core\Widgets\DataTableResponsive;
 use exface\UI5Facade\Facades\Elements\Traits\UI5DataElementTrait;
@@ -194,13 +195,11 @@ JS, false);
             $jsRequestData = 'null';
         }
 
-        // setups table id is needed to dynamically mark applied setup
-        $jsSetupsTableId = $this->escapeString('null');
-        if ($functionName === DataTable::FUNCTION_APPLY_SETUP) {
-            if ($this->getP13nElement()->getSetupsTableId() !== null){
-                $jsSetupsTableId = $this->escapeString($this->getP13nElement()->getSetupsTableId()); 
-            }
-        }
+        // get required setup info/Ids
+        $dataWidget = $this->getDataWidget();
+        $screenSlug = $dataWidget->findUiContainer()->getSlug();
+        $widgetId = $dataWidget->getIdWithinUiContainer();
+        $objectId = $dataWidget->getMetaObject()->getId();
   
         switch (true) {
             case $functionName === DataTable::FUNCTION_CLEAR_APPLIED_SETUP:
@@ -218,11 +217,11 @@ JS, false);
 
                     // if the deleted setup is the one currently saved in dexie for this page and widget,
                     // delete it and reset the table to original state
-                    exfSetupManager.dexie.getCurrentSetup('{$this->getWidget()->getPage()->getUid()}', '{$this->getDataWidget()->getId()}')
+                    exfSetupManager.dexie.getCurrentSetup('{$screenSlug}', '{$widgetId}', '{$objectId}')
                     .then(entry => {
                         if (entry && entry.setup_uid === {$jsRequestData}.rows[0]['UID']) {
                             // delete from dexie db
-                            exfSetupManager.dexie.deleteCurrentSetup('{$this->getWidget()->getPage()->getUid()}', '{$this->getDataWidget()->getId()}');
+                            exfSetupManager.dexie.deleteCurrentSetup('{$screenSlug}', '{$widgetId}', '{$objectId}');
 
                             // reset table
                             let oP13nDialogResetBtn = sap.ui.getCore().byId('{$this->getP13nElement()->getId()}'+'-reset');
@@ -284,12 +283,12 @@ JS;
             case $functionName === DataTable::FUNCTION_DUMP_SETUP:
                 
                 /*
-                    Parameters/column names: dump_setup(SETUP_UXON, PAGE, WIDGET_ID, PROTOTYPE_FILE, OBJECT, PRIVATE_FOR_USER, true/false)
+                    Parameters/column names: dump_setup(SETUP_UXON, SLUG, WIDGET_ID, PROTOTYPE_FILE, OBJECT, PRIVATE_FOR_USER, true/false)
 
                     - SETUP_UXON:
                         The name of the column where the setup UXON will be stored
-                    - PAGE:
-                        the name of the column for the current page UID
+                    - SLUG:
+                        the name of the column for the current screen slug
                     - WIDGET_ID:
                         the name of the column for the current widget ID
                     - PROTOTYPE_FILE:
@@ -313,7 +312,7 @@ JS;
                     console.warn('dump_setup() called with invalid parameters:', aParams);
                     return;
                 }
-                let [sColNameCol, sPageCol, sWidgetIdCol, sPrototypeFileCol, sObjectCol, sUserIdCol] = aParams.map(p => typeof p === 'string' ? p.trim() : p);
+                let [sColNameCol, sSlugCol, sWidgetIdCol, sPrototypeFileCol, sObjectCol, sUserIdCol] = aParams.map(p => typeof p === 'string' ? p.trim() : p);
                 let bAutoApply = (aParams[6] !== undefined && aParams[6] !== null) ? (aParams[6].trim() === 'true' || aParams[6].trim() === true) : false;
 
                 // get the current setup as json in widget_setup format
@@ -337,10 +336,10 @@ JS;
 
                 // write the current setup and info into to the input data
                 {$jsRequestData}.rows[0][sColNameCol] = JSON.stringify(oSetupJson);
-                {$jsRequestData}.rows[0][sPageCol] = '{$this->getWidget()->getPage()->getUid()}';
-                {$jsRequestData}.rows[0][sWidgetIdCol] = '{$this->getDataWidget()->getId()}';
+                {$jsRequestData}.rows[0][sSlugCol] = '{$screenSlug}';
+                {$jsRequestData}.rows[0][sWidgetIdCol] = '{$widgetId}';
                 {$jsRequestData}.rows[0][sPrototypeFileCol] = 'exface/core/Mutations/Prototypes/DataTableSetup.php';
-                {$jsRequestData}.rows[0][sObjectCol] = '{$this->getDataWidget()->getMetaObject()->getId()}';
+                {$jsRequestData}.rows[0][sObjectCol] = '{$objectId}';
 
                 if (bAutoApply === true){
                     {$this->buildJsCallFunction(DataTable::FUNCTION_APPLY_SETUP, [ '[#' . $parameters[0] . '#]' ], $jsRequestData)}
@@ -351,14 +350,15 @@ JS;
             case $functionName === DataTable::FUNCTION_APPLY_SETUP:
                 // parameter: apply_setup([#SETUP_UXON#]) -> column in which the setup is stored
                 // alternatively, apply_setup(['localStorage']) -> to retrieve saved setup from indexedDb
-                
+                // TODO!!
                 return <<<JS
 
                 // get currently selected data from request
                 let oResultData = {$jsRequestData};
                 let oSetupUxon = null;
-                let sPageId = '{$this->getWidget()->getPage()->getUid()}';
-                let sWidgetId = '{$this->getDataWidget()->getId()}';
+                let sSlug = '{$screenSlug}';
+                let sWidgetId = '{$widgetId}';
+                let sObjectId = '{$objectId}';
 
                 // if the function is not called with 'localStorage' parameter,
                 // and there is data in the request, get the setup Uxon from the request data
@@ -376,7 +376,7 @@ JS;
 
                 // either use the passed oSetupUxon, or try and load the data from IndexedDB (onLoad)
                 // then apply the setup and update the related ui elements (quick select caption, active column in setups table, reset the change tracking)
-                exfSetupManager.getSetupProperty(sPageId, sWidgetId, oSetupUxon, 'setup_uxon')
+                exfSetupManager.getSetupProperty(sSlug, sWidgetId, sObjectId, oSetupUxon, 'setup_uxon')
                 .then(oSetupUxon => {
                     if (oSetupUxon) {
 
@@ -394,8 +394,9 @@ JS;
                         // do this only if it was actively applied (not when loading from indexedDb)
                         if ({$passedParameters}[0] !== 'localStorage'){
                             exfSetupManager.dexie.saveLastAppliedSetup(
-                                oResultData.rows[0]['PAGE'],
+                                oResultData.rows[0]['SLUG'],
                                 oResultData.rows[0]['WIDGET_ID'],
+                                oResultData.rows[0]['OBJECT'],
                                 oResultData.rows[0]['UID'],
                                 oResultData.rows[0]['SETUP_UXON'],
                                 oResultData.rows[0]['NAME']

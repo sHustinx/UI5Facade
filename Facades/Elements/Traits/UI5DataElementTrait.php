@@ -206,8 +206,8 @@ trait UI5DataElementTrait {
                         
                         // Update UI Elements onchange of widget setup 
                         oWidget.attachEvent('appliedWidgetSetup', function (oEvent) {
-                            exfSetupManager.markCurrentSetupAsActive('{$this->getP13nElement()->getSetupsTableId()}', '{$this->getWidget()->getPage()->getUid()}' , '{$this->getDataWidget()->getId()}', true);
-                            exfSetupManager.updateQuickSelectButtonCaption('{$this->getWidget()->getPage()->getUid()}' , '{$this->getDataWidget()->getId()}', '{$this->getId()}');
+                            exfSetupManager.markCurrentSetupAsActive('{$this->getP13nElement()->getSetupsTableId()}', '{$this->getDataWidget()->findUiContainer()->getSlug()}' , '{$this->getDataWidget()->getIdWithinUiContainer()}', '{$this->getDataWidget()->getMetaObject()->getId()}', true);
+                            exfSetupManager.updateQuickSelectButtonCaption('{$this->getDataWidget()->findUiContainer()->getSlug()}' , '{$this->getDataWidget()->getIdWithinUiContainer()}', '{$this->getDataWidget()->getMetaObject()->getId()}', '{$this->getId()}');
                             oWidget.data('_exfWidgetSetupChangeListenerAttached', true);
                         });
                     }
